@@ -16,18 +16,20 @@
       margin: 0;
       min-height: 100vh;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       background:
         radial-gradient(circle at top, rgba(255,255,255,0.8) 0, rgba(255,255,255,0) 35%),
         linear-gradient(180deg, var(--bg1), var(--bg2));
       font-family: "Trebuchet MS", "Verdana", sans-serif;
       color: var(--ink);
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
     .shell {
       width: min(1200px, 96vw);
       padding: 16px;
+      margin: 12px 0;
       border-radius: 26px;
       background: rgba(255,255,255,0.28);
       box-shadow: 0 20px 70px rgba(16, 35, 58, 0.2);
@@ -84,7 +86,7 @@
       border: 4px solid rgba(255,255,255,0.48);
       box-shadow: inset 0 -30px 70px rgba(0, 0, 0, 0.08);
       cursor: grab;
-      touch-action: none;
+      touch-action: pan-y;
     }
     canvas.dragging { cursor: grabbing; }
     .controls {
@@ -145,6 +147,7 @@
       .shell { width: 100vw; min-height: 100vh; border-radius: 0; }
       .hud { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
       .controls { right: 10px; top: 10px; }
+      body { align-items: stretch; }
     }
   </style>
 </head>
@@ -165,7 +168,10 @@
       </div>
     </div>
     <div class="layout">
-      <div class="controls"><button id="restartButton" type="button">Reiniciar</button></div>
+      <div class="controls">
+        <button id="audioButton" type="button">Audio: Off</button>
+        <button id="restartButton" type="button">Reiniciar</button>
+      </div>
       <canvas id="game" width="1200" height="720"></canvas>
       <div class="overlay" id="overlay">
         <div class="overlay-card">
@@ -210,6 +216,7 @@
     const overlayText = document.getElementById("overlayText");
     const overlayStats = document.getElementById("overlayStats");
     const overlayButton = document.getElementById("overlayButton");
+    const audioButton = document.getElementById("audioButton");
     const restartButton = document.getElementById("restartButton");
     const scoreValue = document.getElementById("scoreValue");
     const loadedValue = document.getElementById("loadedValue");
@@ -228,10 +235,147 @@
       currentBag: null, draggedBag: null, dragging: false, dragStart: null, dragPoint: null,
       dragVisual: null,
       laughTimer: 0,
+      inputMode: null,
       entities: [], particles: [], popups: [], shake: 0, spawnTimer: 0, introBlink: 0
     };
     const rand = (min, max) => Math.random() * (max - min) + min;
     const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+    const audio = {
+      ctx: null,
+      master: null,
+      musicGain: null,
+      sfxGain: null,
+      enabled: false,
+      started: false,
+      nextBeatAt: 0,
+      musicTimer: 0
+    };
+
+    function updateAudioButton() {
+      audioButton.textContent = audio.enabled ? "Audio: On" : "Audio: Off";
+    }
+
+    function ensureAudioContext() {
+      if (audio.ctx) return true;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      audio.ctx = new AC();
+      audio.master = audio.ctx.createGain();
+      audio.musicGain = audio.ctx.createGain();
+      audio.sfxGain = audio.ctx.createGain();
+      audio.master.gain.value = 0.5;
+      audio.musicGain.gain.value = 0.17;
+      audio.sfxGain.gain.value = 0.5;
+      audio.musicGain.connect(audio.master);
+      audio.sfxGain.connect(audio.master);
+      audio.master.connect(audio.ctx.destination);
+      return true;
+    }
+
+    function playTone(type, frequency, duration, volume, destination, when = 0, detune = 0) {
+      if (!audio.enabled || !ensureAudioContext()) return;
+      const now = audio.ctx.currentTime + when;
+      const osc = audio.ctx.createOscillator();
+      const gain = audio.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, now);
+      osc.detune.setValueAtTime(detune, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(volume, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    }
+
+    function playNoiseBurst(duration, volume, destination, when = 0, highpass = 500) {
+      if (!audio.enabled || !ensureAudioContext()) return;
+      const sampleRate = audio.ctx.sampleRate;
+      const frameCount = Math.max(1, Math.floor(sampleRate * duration));
+      const buffer = audio.ctx.createBuffer(1, frameCount, sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < frameCount; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / frameCount);
+      }
+      const source = audio.ctx.createBufferSource();
+      const filter = audio.ctx.createBiquadFilter();
+      const gain = audio.ctx.createGain();
+      const now = audio.ctx.currentTime + when;
+      filter.type = "highpass";
+      filter.frequency.setValueAtTime(highpass, now);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      source.buffer = buffer;
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(destination);
+      source.start(now);
+      source.stop(now + duration + 0.02);
+    }
+
+    function triggerLaunchSound(weight) {
+      if (!audio.enabled) return;
+      playTone("triangle", 190 / Math.max(0.7, weight), 0.16, 0.09, audio.sfxGain);
+      playTone("square", 260 / Math.max(0.8, weight), 0.08, 0.05, audio.sfxGain, 0.03);
+    }
+
+    function triggerImpactSound(power, broken = false) {
+      if (!audio.enabled) return;
+      const vol = clamp(power / 24, 0.05, 0.22);
+      playNoiseBurst(0.12, vol, audio.sfxGain, 0, 240);
+      playTone("triangle", broken ? 120 : 150, 0.11, vol * 0.85, audio.sfxGain, 0.01);
+      if (broken) {
+        playTone("square", 420, 0.08, 0.08, audio.sfxGain, 0.02, 600);
+      }
+    }
+
+    function triggerScoreSound() {
+      if (!audio.enabled) return;
+      playTone("triangle", 520, 0.12, 0.09, audio.sfxGain);
+      playTone("triangle", 680, 0.16, 0.08, audio.sfxGain, 0.08);
+    }
+
+    function triggerLaughSound() {
+      if (!audio.enabled) return;
+      playTone("square", 520, 0.08, 0.055, audio.sfxGain, 0);
+      playTone("square", 610, 0.07, 0.05, audio.sfxGain, 0.06);
+      playTone("square", 480, 0.07, 0.042, audio.sfxGain, 0.13);
+    }
+
+    function tickMusic() {
+      if (!audio.enabled || !ensureAudioContext()) return;
+      const now = audio.ctx.currentTime;
+      if (!audio.started) {
+        audio.nextBeatAt = now + 0.05;
+        audio.started = true;
+      }
+      const chords = [185, 220, 196, 247];
+      while (audio.nextBeatAt < now + 0.35) {
+        const root = chords[Math.floor(audio.musicTimer) % chords.length];
+        playTone("sine", root, 0.32, 0.03, audio.musicGain, audio.nextBeatAt - now);
+        playTone("sine", root * 1.5, 0.26, 0.022, audio.musicGain, audio.nextBeatAt - now + 0.04);
+        if (Math.floor(audio.musicTimer * 2) % 2 === 0) {
+          playTone("triangle", 92, 0.12, 0.028, audio.musicGain, audio.nextBeatAt - now);
+        }
+        audio.nextBeatAt += 0.42;
+        audio.musicTimer += 1;
+      }
+    }
+
+    async function toggleAudio() {
+      if (!ensureAudioContext()) return;
+      if (audio.ctx.state === "suspended") {
+        await audio.ctx.resume();
+      }
+      audio.enabled = !audio.enabled;
+      if (audio.enabled) {
+        audio.started = false;
+        tickMusic();
+      }
+      updateAudioButton();
+    }
 
     function roundRect(ctx2d, x, y, w, h, r) {
       const radius = Math.min(r, w * 0.5, h * 0.5);
@@ -268,6 +412,8 @@
       state.draggedBag = null;
       state.dragging = false;
       state.dragVisual = null;
+      state.inputMode = null;
+      canvas.style.touchAction = "pan-y";
       canvas.classList.remove("dragging");
       state.spawnTimer = delay;
     }
@@ -367,6 +513,7 @@
       state.dragPoint = point;
       state.dragVisual = { x: bag.x, y: bag.y };
       state.inputMode = isTouch ? "touch" : "mouse";
+      canvas.style.touchAction = "none";
       if (canvas.setPointerCapture && evt.pointerId !== undefined) {
         try { canvas.setPointerCapture(evt.pointerId); } catch (_) {}
       }
@@ -411,6 +558,7 @@
         bag.av = clamp((-pullX * 0.0031 + pullY * 0.0022) / launchWeight + bag.type.angularBoost * rand(10, 18), -0.56, 0.56);
         bag.angle = rand(-0.2, 0.2);
         state.thrown++;
+        triggerLaunchSound(bag.weight);
         burst(bag.x, bag.y + bag.height * 0.3, 10, "rgba(255,255,255,0.95)", 4, 5);
       }
       state.dragging = false;
@@ -419,6 +567,7 @@
       state.dragPoint = null;
       state.dragVisual = null;
       state.inputMode = null;
+      canvas.style.touchAction = "pan-y";
       canvas.classList.remove("dragging");
     }
     function rectsOverlap(a, b) { return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y; }
@@ -450,6 +599,7 @@
       state.score += bag.scoreValue;
       state.loaded++;
       state.shake = 10;
+      triggerScoreSound();
       makePopup(Math.random() < 0.55 ? "Dentro!" : "Perfeita!", bag.x, bag.y - 40, "#2fbf71");
       burst(bag.x, bag.y, 18, "rgba(47,191,113,0.9)", 6.5, 7);
       queueNextBag();
@@ -464,6 +614,7 @@
       bag.av *= 0.4;
       state.broken++;
       state.laughTimer = 1.25;
+      triggerLaughSound();
       state.score = Math.max(0, state.score - 25);
       state.shake = 12;
       makePopup("Quebrou!", bag.x, bag.y - 36, "#ff4d6d");
@@ -600,10 +751,12 @@
         bag.vy = -impactSpeed * Math.max(0.12, bag.bounce);
         bag.vx *= 0.88;
         bag.av *= 0.82;
+        triggerImpactSound(impactSpeed, false);
         burst(bag.x, groundY - 8, Math.round(clamp(impactSpeed * 0.9, 5, 16)), "rgba(121, 83, 47, 0.38)", 3.8, 5.5);
         if (impactSpeed > CONFIG.breakVelocityThreshold * bag.weight) {
           const chance = CONFIG.breakBaseChance + bag.breakable + (impactSpeed - CONFIG.breakVelocityThreshold * bag.weight) * 0.03;
           if (Math.random() < chance) {
+            triggerImpactSound(impactSpeed * 0.9, true);
             markBroken(bag);
             return;
           }
@@ -651,6 +804,7 @@
       state.introBlink += dt;
       state.laughTimer = Math.max(0, state.laughTimer - dt);
       if (state.mode === "playing") {
+        tickMusic();
         state.roundTime -= dt;
         if (state.roundTime <= 0) {
           state.roundTime = 0;
@@ -1080,8 +1234,10 @@
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", releaseDrag);
     window.addEventListener("pointercancel", releaseDrag);
+    audioButton.addEventListener("click", toggleAudio);
     restartButton.addEventListener("click", resetGame);
     overlayButton.addEventListener("click", startGame);
+    updateAudioButton();
     showOverlay("Ramp Ruckus", "Clique e arraste a mala para mirar. Solte para lançar no compartimento destacado do avião. Quanto mais rápido, mais bagunça produtiva.", false);
     requestAnimationFrame(frame);
   </script>
