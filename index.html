@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ramp Ruckus</title>
+  <style>
+    :root {
+      --bg1: #89d5ff;
+      --bg2: #ffd0a8;
+      --ink: #19334d;
+      --panel: rgba(255, 250, 239, 0.92);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at top, rgba(255,255,255,0.8) 0, rgba(255,255,255,0) 35%),
+        linear-gradient(180deg, var(--bg1), var(--bg2));
+      font-family: "Trebuchet MS", "Verdana", sans-serif;
+      color: var(--ink);
+      overflow: hidden;
+    }
+    .shell {
+      width: min(1200px, 96vw);
+      padding: 16px;
+      border-radius: 26px;
+      background: rgba(255,255,255,0.28);
+      box-shadow: 0 20px 70px rgba(16, 35, 58, 0.2);
+      backdrop-filter: blur(12px);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .title { display: flex; flex-direction: column; gap: 2px; }
+    .title h1 {
+      margin: 0;
+      font-size: clamp(1.8rem, 3.4vw, 3rem);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .title p { margin: 0; font-size: 0.95rem; opacity: 0.78; }
+    .hud {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(110px, 1fr));
+      gap: 10px;
+      flex: 1;
+      min-width: min(100%, 740px);
+    }
+    .card {
+      background: var(--panel);
+      border: 3px solid rgba(25, 51, 77, 0.12);
+      border-radius: 18px;
+      padding: 10px 12px;
+      box-shadow: inset 0 -6px 0 rgba(25, 51, 77, 0.05);
+    }
+    .card .label {
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.65;
+      margin-bottom: 2px;
+    }
+    .card .value { font-size: 1.15rem; font-weight: 700; }
+    .layout { position: relative; }
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.1)),
+        linear-gradient(180deg, #8dd7ff 0%, #c9edff 48%, #f5cb9b 49%, #d7aa76 100%);
+      border: 4px solid rgba(255,255,255,0.48);
+      box-shadow: inset 0 -30px 70px rgba(0, 0, 0, 0.08);
+      cursor: grab;
+      touch-action: none;
+    }
+    canvas.dragging { cursor: grabbing; }
+    .controls {
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      display: flex;
+      gap: 10px;
+      z-index: 2;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font: inherit;
+      font-weight: 700;
+      color: white;
+      background: linear-gradient(180deg, #ff915c, #ff6a2d);
+      box-shadow: 0 8px 0 #cf5420, 0 12px 25px rgba(0,0,0,0.18);
+      cursor: pointer;
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .overlay.hidden { display: none; }
+    .overlay-card {
+      width: min(520px, calc(100% - 32px));
+      background: rgba(255, 247, 232, 0.96);
+      border: 4px solid rgba(25, 51, 77, 0.1);
+      border-radius: 28px;
+      box-shadow: 0 24px 60px rgba(16, 35, 58, 0.25);
+      padding: 24px;
+      text-align: center;
+      pointer-events: auto;
+    }
+    .overlay-card h2 {
+      margin: 0 0 12px;
+      font-size: clamp(1.7rem, 4vw, 2.6rem);
+      text-transform: uppercase;
+    }
+    .overlay-card p { margin: 8px 0; line-height: 1.45; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      gap: 10px;
+      margin: 16px 0 18px;
+      text-align: left;
+    }
+    .stat { padding: 10px 12px; border-radius: 16px; background: white; }
+    .legend { font-size: 0.95rem; opacity: 0.8; }
+    @media (max-width: 900px) { .hud { grid-template-columns: repeat(3, minmax(110px, 1fr)); } }
+    @media (max-width: 680px) {
+      .shell { width: 100vw; min-height: 100vh; border-radius: 0; }
+      .hud { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+      .controls { right: 10px; top: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="title">
+        <h1>Ramp Ruckus</h1>
+        <p>Jogue malas, faça pontos e finja que isso sempre foi o plano.</p>
+      </div>
+      <div class="hud">
+        <div class="card"><span class="label">Pontuação</span><span class="value" id="scoreValue">0</span></div>
+        <div class="card"><span class="label">Carregadas</span><span class="value" id="loadedValue">0</span></div>
+        <div class="card"><span class="label">Quebradas</span><span class="value" id="brokenValue">0</span></div>
+        <div class="card"><span class="label">Tempo</span><span class="value" id="timeValue">45.0s</span></div>
+        <div class="card"><span class="label">Mala Atual</span><span class="value" id="bagTypeValue">-</span></div>
+        <div class="card"><span class="label">Peso</span><span class="value" id="bagWeightValue">-</span></div>
+      </div>
+    </div>
+    <div class="layout">
+      <div class="controls"><button id="restartButton" type="button">Reiniciar</button></div>
+      <canvas id="game" width="1200" height="720"></canvas>
+      <div class="overlay" id="overlay">
+        <div class="overlay-card">
+          <h2 id="overlayTitle">Ramp Ruckus</h2>
+          <p id="overlayText">Clique e arraste a mala para trás do funcionário. Solte para mandar a bagagem voando para o porão do avião.</p>
+          <div class="stats" id="overlayStats"></div>
+          <button id="overlayButton" type="button">Começar turno</button>
+          <p class="legend">Dica: malas leves voam e giram mais. Malas pesadas exigem mais força e quebram quando aterrissam com brutalidade cômica.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const CONFIG = {
+      gravity: 0.46,
+      launchForce: 0.26,
+      maxDrag: 220,
+      roundDuration: 45,
+      spawnDelay: 750,
+      wallBounce: 0.28,
+      cargoAssistStrength: 0.032,
+      touchPickupRadius: 92,
+      touchMaxDrag: 260,
+      touchDragBoost: 1.18,
+      cargoOpening: { x: 896, y: 278, width: 188, height: 132 },
+      cargoDepth: { x: 1016, y: 282, width: 118, height: 128 },
+      breakBaseChance: 0.16,
+      breakVelocityThreshold: 11.8,
+      bagTypes: [
+        { name: "Mini Turbo", weight: 0.62, size: 36, color: "#ffb703", accent: "#fff1a8", breakable: 0.09, bounce: 0.52, weirdness: 0.04, angularBoost: 0.2, score: 110 },
+        { name: "Mala Média", weight: 1.0, size: 46, color: "#ff7b54", accent: "#ffd8c7", breakable: 0.13, bounce: 0.35, weirdness: 0.06, angularBoost: 0.1, score: 130 },
+        { name: "Gigante Densa", weight: 1.72, size: 64, color: "#536dfe", accent: "#bec7ff", breakable: 0.24, bounce: 0.18, weirdness: 0.08, angularBoost: 0.04, score: 170 },
+        { name: "Fragilona Neon", weight: 0.8, size: 44, color: "#ff4d6d", accent: "#ffc0cd", breakable: 0.48, bounce: 0.27, weirdness: 0.11, angularBoost: 0.22, score: 150 },
+        { name: "Reforçada Elástica", weight: 1.18, size: 50, color: "#2ec4b6", accent: "#b8fff8", breakable: 0.07, bounce: 0.58, weirdness: 0.03, angularBoost: 0.08, score: 145 },
+        { name: "Torta Misteriosa", weight: 1.34, size: 58, color: "#9b5de5", accent: "#eed8ff", breakable: 0.22, bounce: 0.24, weirdness: 0.26, angularBoost: 0.26, score: 165, skewed: true }
+      ]
+    };
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("overlay");
+    const overlayTitle = document.getElementById("overlayTitle");
+    const overlayText = document.getElementById("overlayText");
+    const overlayStats = document.getElementById("overlayStats");
+    const overlayButton = document.getElementById("overlayButton");
+    const restartButton = document.getElementById("restartButton");
+    const scoreValue = document.getElementById("scoreValue");
+    const loadedValue = document.getElementById("loadedValue");
+    const brokenValue = document.getElementById("brokenValue");
+    const timeValue = document.getElementById("timeValue");
+    const bagTypeValue = document.getElementById("bagTypeValue");
+    const bagWeightValue = document.getElementById("bagWeightValue");
+    const groundY = 572;
+    const workerAnchor = { x: 206, y: 504 };
+    const beltRect = { x: 96, y: 500, width: 180, height: 56 };
+    const planeBody = { x: 760, y: 172, width: 360, height: 280 };
+    const state = {
+      mode: "intro",
+      roundTime: CONFIG.roundDuration,
+      score: 0, loaded: 0, broken: 0, thrown: 0, bagCounter: 0,
+      currentBag: null, draggedBag: null, dragging: false, dragStart: null, dragPoint: null,
+      dragVisual: null,
+      laughTimer: 0,
+      entities: [], particles: [], popups: [], shake: 0, spawnTimer: 0, introBlink: 0
+    };
+    const rand = (min, max) => Math.random() * (max - min) + min;
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+    function roundRect(ctx2d, x, y, w, h, r) {
+      const radius = Math.min(r, w * 0.5, h * 0.5);
+      ctx2d.beginPath();
+      ctx2d.moveTo(x + radius, y);
+      ctx2d.arcTo(x + w, y, x + w, y + h, radius);
+      ctx2d.arcTo(x + w, y + h, x, y + h, radius);
+      ctx2d.arcTo(x, y + h, x, y, radius);
+      ctx2d.arcTo(x, y, x + w, y, radius);
+      ctx2d.closePath();
+    }
+
+    function createBag(type) {
+      const bag = {
+        id: ++state.bagCounter,
+        type,
+        x: workerAnchor.x + 18,
+        y: workerAnchor.y - type.size * 0.55,
+        vx: 0, vy: 0, angle: 0, av: 0, size: type.size,
+        width: type.size * (type.skewed ? 1.25 : rand(1.02, 1.24)),
+        height: type.size * rand(0.76, 1.02),
+        weight: type.weight, color: type.color, accent: type.accent,
+        breakable: type.breakable, bounce: type.bounce, weirdness: type.weirdness,
+        scoreValue: type.score, handleOffset: type.skewed ? rand(-0.28, 0.28) : rand(-0.08, 0.08),
+        state: "ready", loaded: false, broken: false, lifeTimer: 0, restFrames: 0
+      };
+      bagTypeValue.textContent = type.name;
+      bagWeightValue.textContent = `${type.weight.toFixed(2)}x`;
+      return bag;
+    }
+
+    function queueNextBag(delay = CONFIG.spawnDelay) {
+      state.currentBag = null;
+      state.draggedBag = null;
+      state.dragging = false;
+      state.dragVisual = null;
+      canvas.classList.remove("dragging");
+      state.spawnTimer = delay;
+    }
+    function spawnBag() {
+      if (state.mode !== "playing" || state.currentBag) return;
+      const pick = CONFIG.bagTypes[Math.floor(Math.random() * CONFIG.bagTypes.length)];
+      const bag = createBag(pick);
+      state.currentBag = bag;
+      state.entities.push(bag);
+    }
+    function updateHud() {
+      scoreValue.textContent = state.score;
+      loadedValue.textContent = state.loaded;
+      brokenValue.textContent = state.broken;
+      timeValue.textContent = `${Math.max(0, state.roundTime).toFixed(1)}s`;
+      if (!state.currentBag) {
+        bagTypeValue.textContent = "-";
+        bagWeightValue.textContent = "-";
+      }
+    }
+    function showOverlay(title, text, finished = false) {
+      overlay.classList.remove("hidden");
+      overlayTitle.textContent = title;
+      overlayText.textContent = text;
+      overlayStats.innerHTML = finished ? `
+        <div class="stat"><strong>Pontuação:</strong> ${state.score}</div>
+        <div class="stat"><strong>Malas no avião:</strong> ${state.loaded}</div>
+        <div class="stat"><strong>Quebradas:</strong> ${state.broken}</div>
+        <div class="stat"><strong>Arremessadas:</strong> ${state.thrown}</div>
+      ` : `
+        <div class="stat"><strong>Meta:</strong> entupa o porão antes do cronômetro zerar.</div>
+        <div class="stat"><strong>Controle:</strong> clique e puxe a mala para mirar.</div>
+      `;
+      overlayButton.textContent = finished ? "Jogar de novo" : "Começar turno";
+    }
+    const hideOverlay = () => overlay.classList.add("hidden");
+    function makePopup(text, x, y, color) { state.popups.push({ text, x, y, color, life: 1.2, vy: rand(-0.5, -1.2) }); }
+    function burst(x, y, count, color, speed = 5, size = 6) {
+      for (let i = 0; i < count; i++) {
+        const a = rand(0, Math.PI * 2);
+        const s = rand(speed * 0.3, speed);
+        state.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - rand(0.4, 1.8), life: rand(0.4, 0.95), size: rand(size * 0.35, size), color, spin: rand(-0.15, 0.15), angle: rand(0, Math.PI * 2) });
+      }
+    }
+    function startGame() {
+      state.mode = "playing";
+      state.roundTime = CONFIG.roundDuration;
+      state.score = 0;
+      state.loaded = 0;
+      state.broken = 0;
+      state.thrown = 0;
+      state.laughTimer = 0;
+      state.entities.length = 0;
+      state.particles.length = 0;
+      state.popups.length = 0;
+      state.shake = 0;
+      updateHud();
+      queueNextBag(100);
+      hideOverlay();
+    }
+    function endGame() { state.mode = "finished"; showOverlay("Fim do Turno", "O porão sobreviveu. A reputação da equipe, talvez não.", true); }
+    const resetGame = () => startGame();
+    function screenToCanvas(evt) {
+      const rect = canvas.getBoundingClientRect();
+      return { x: (evt.clientX - rect.left) * (canvas.width / rect.width), y: (evt.clientY - rect.top) * (canvas.height / rect.height) };
+    }
+    function pickReadyBag(point) {
+      const bag = state.currentBag;
+      if (!bag || bag.state !== "ready") return null;
+      const pad = 26;
+      return (Math.abs(point.x - bag.x) <= bag.width * 0.6 + pad && Math.abs(point.y - bag.y) <= bag.height * 0.6 + pad) ? bag : null;
+    }
+    function pickTouchLaunchBag(point) {
+      const bag = state.currentBag;
+      if (!bag || bag.state !== "ready") return null;
+      const dx = point.x - bag.x;
+      const dy = point.y - bag.y;
+      if (Math.hypot(dx, dy) <= CONFIG.touchPickupRadius) return bag;
+      const zone = {
+        x: beltRect.x - 28,
+        y: beltRect.y - 64,
+        width: beltRect.width + 86,
+        height: beltRect.height + 104
+      };
+      return rectsOverlap({ x: point.x - 1, y: point.y - 1, width: 2, height: 2 }, zone) ? bag : null;
+    }
+    function onPointerDown(evt) {
+      if (state.mode !== "playing") return;
+      const point = screenToCanvas(evt);
+      const isTouch = evt.pointerType === "touch";
+      const bag = isTouch ? (pickTouchLaunchBag(point) || pickReadyBag(point)) : pickReadyBag(point);
+      if (!bag) return;
+      evt.preventDefault();
+      state.dragging = true;
+      state.draggedBag = bag;
+      state.dragStart = { x: bag.x, y: bag.y };
+      state.dragPoint = point;
+      state.dragVisual = { x: bag.x, y: bag.y };
+      state.inputMode = isTouch ? "touch" : "mouse";
+      if (canvas.setPointerCapture && evt.pointerId !== undefined) {
+        try { canvas.setPointerCapture(evt.pointerId); } catch (_) {}
+      }
+      canvas.classList.add("dragging");
+    }
+    function onPointerMove(evt) {
+      if (!state.dragging || !state.draggedBag) return;
+      evt.preventDefault();
+      state.dragPoint = screenToCanvas(evt);
+      const dx = state.dragPoint.x - state.dragStart.x;
+      const dy = state.dragPoint.y - state.dragStart.y;
+      const maxDrag = state.inputMode === "touch" ? CONFIG.touchMaxDrag : CONFIG.maxDrag;
+      const boost = state.inputMode === "touch" ? CONFIG.touchDragBoost : 1;
+      const dist = Math.min(Math.hypot(dx, dy) * boost, maxDrag);
+      const angle = Math.atan2(dy, dx);
+      state.dragVisual = {
+        x: state.dragStart.x + Math.cos(angle) * dist * 0.38,
+        y: state.dragStart.y + Math.sin(angle) * dist * 0.38
+      };
+    }
+    function releaseDrag(evt) {
+      if (!state.dragging || !state.draggedBag) return;
+      if (evt && evt.preventDefault) evt.preventDefault();
+      const point = evt ? screenToCanvas(evt) : state.dragPoint;
+      const bag = state.draggedBag;
+      const dx = point.x - state.dragStart.x;
+      const dy = point.y - state.dragStart.y;
+      const maxDrag = state.inputMode === "touch" ? CONFIG.touchMaxDrag : CONFIG.maxDrag;
+      const boost = state.inputMode === "touch" ? CONFIG.touchDragBoost : 1;
+      const dist = Math.hypot(dx, dy) * boost;
+      const limited = Math.min(dist, maxDrag);
+      const angle = Math.atan2(dy, dx);
+      const pullX = Math.cos(angle) * limited;
+      const pullY = Math.sin(angle) * limited;
+      bag.x = state.dragStart.x;
+      bag.y = state.dragStart.y;
+      if (limited > 10) {
+        bag.state = "flying";
+        const launchWeight = Math.pow(bag.weight, 1.16);
+        bag.vx = (-pullX * CONFIG.launchForce) / launchWeight;
+        bag.vy = (-pullY * CONFIG.launchForce * 1.05) / launchWeight - 1.4;
+        bag.av = clamp((-pullX * 0.0031 + pullY * 0.0022) / launchWeight + bag.type.angularBoost * rand(10, 18), -0.56, 0.56);
+        bag.angle = rand(-0.2, 0.2);
+        state.thrown++;
+        burst(bag.x, bag.y + bag.height * 0.3, 10, "rgba(255,255,255,0.95)", 4, 5);
+      }
+      state.dragging = false;
+      state.draggedBag = null;
+      state.dragStart = null;
+      state.dragPoint = null;
+      state.dragVisual = null;
+      state.inputMode = null;
+      canvas.classList.remove("dragging");
+    }
+    function rectsOverlap(a, b) { return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y; }
+    function getBagBounds(bag) { return { x: bag.x - bag.width * 0.5, y: bag.y - bag.height * 0.5, width: bag.width, height: bag.height }; }
+    function bagInsideCargo(bag) {
+      const bounds = getBagBounds(bag);
+      const generousOpening = {
+        x: CONFIG.cargoOpening.x - 18,
+        y: CONFIG.cargoOpening.y - 16,
+        width: CONFIG.cargoOpening.width + 54,
+        height: CONFIG.cargoOpening.height + 32
+      };
+      const approachLane = {
+        x: CONFIG.cargoOpening.x - 110,
+        y: CONFIG.cargoOpening.y - 6,
+        width: 150,
+        height: CONFIG.cargoOpening.height + 16
+      };
+      const directHit = rectsOverlap(bounds, generousOpening) && bag.x > CONFIG.cargoOpening.x - 6 && bag.y > CONFIG.cargoOpening.y - 4;
+      const laneAssist = rectsOverlap(bounds, approachLane) && bag.vx > 1.8;
+      return directHit || laneAssist;
+    }
+    function markLoaded(bag) {
+      if (bag.loaded || bag.broken) return;
+      bag.loaded = true;
+      bag.state = "loaded";
+      bag.vx *= 0.2;
+      bag.vy *= 0.2;
+      state.score += bag.scoreValue;
+      state.loaded++;
+      state.shake = 10;
+      makePopup(Math.random() < 0.55 ? "Dentro!" : "Perfeita!", bag.x, bag.y - 40, "#2fbf71");
+      burst(bag.x, bag.y, 18, "rgba(47,191,113,0.9)", 6.5, 7);
+      queueNextBag();
+      updateHud();
+    }
+    function markBroken(bag) {
+      if (bag.broken || bag.loaded) return;
+      bag.broken = true;
+      bag.state = "broken";
+      bag.vx *= 0.35;
+      bag.vy = -Math.abs(bag.vy) * 0.14;
+      bag.av *= 0.4;
+      state.broken++;
+      state.laughTimer = 1.25;
+      state.score = Math.max(0, state.score - 25);
+      state.shake = 12;
+      makePopup("Quebrou!", bag.x, bag.y - 36, "#ff4d6d");
+      makePopup("HA!", workerAnchor.x + 18, 330, "#ff8f3f");
+      makePopup("hehe", 334, 360, "#1a56a3");
+      burst(bag.x, bag.y, 26, "rgba(255, 110, 127, 0.95)", 7.8, 8);
+      burst(bag.x + rand(-10, 10), bag.y, 12, "rgba(255,255,255,0.92)", 5.5, 5);
+      queueNextBag();
+      updateHud();
+    }
+    function markMissed(bag) {
+      if (bag.loaded || bag.broken || bag.state === "missed") return;
+      bag.state = "missed";
+      bag.vx *= 0.45;
+      bag.vy *= 0.1;
+      makePopup("Próxima mala!", bag.x, bag.y - 32, "#1f3c55");
+      queueNextBag(420);
+      updateHud();
+    }
+    function bounceBagFromPlane(bag, bounds) {
+      const opening = CONFIG.cargoOpening;
+      const funnel = { x: opening.x - 150, y: opening.y - 18, width: 160, height: opening.height + 30 };
+      if (rectsOverlap(bounds, funnel) && bag.vx > 0) {
+        const centerY = opening.y + opening.height * 0.5;
+        bag.vx = Math.max(bag.vx, 5.4);
+        bag.vy += (centerY - bag.y) * CONFIG.cargoAssistStrength;
+        bag.av *= 0.96;
+      }
+      const mouthAssist = {
+        x: opening.x - 26,
+        y: opening.y - 8,
+        width: opening.width + 40,
+        height: opening.height + 14
+      };
+      if (rectsOverlap(bounds, mouthAssist) && bag.vx > 0.8) {
+        bag.vx = Math.max(bag.vx, 6.2);
+        bag.vy *= 0.82;
+        bag.y += (opening.y + opening.height * 0.5 - bag.y) * 0.08;
+      }
+      const topLip = { x: opening.x + 34, y: opening.y - 18, width: opening.width - 28, height: 16 };
+      const bottomLip = { x: opening.x + 30, y: opening.y + opening.height, width: opening.width - 24, height: 16 };
+      if (rectsOverlap(bounds, topLip) && bag.vy > -1.5) {
+        bag.y = topLip.y - bag.height * 0.5;
+        bag.vy = -Math.abs(bag.vy) * 0.58 - 1.1;
+        bag.vx *= 0.86;
+        bag.av += 0.05;
+        burst(bag.x, bag.y + bag.height * 0.35, 7, "rgba(255,255,255,0.85)", 4, 4.5);
+      } else if (rectsOverlap(bounds, bottomLip) && bag.vy > 0) {
+        bag.y = bottomLip.y - bag.height * 0.5;
+        bag.vy = -Math.abs(bag.vy) * 0.45;
+        bag.vx *= 0.88;
+        bag.av += 0.04;
+        burst(bag.x, bag.y + bag.height * 0.35, 6, "rgba(255,255,255,0.8)", 3.6, 4.2);
+      } else {
+        const fuselage = { x: planeBody.x, y: planeBody.y + 34, width: planeBody.width, height: planeBody.height - 50 };
+        if (rectsOverlap(bounds, fuselage) && !rectsOverlap(bounds, opening)) {
+          const safeLane = {
+            x: opening.x - 80,
+            y: opening.y - 22,
+            width: 130,
+            height: opening.height + 44
+          };
+          if (rectsOverlap(bounds, safeLane) && bag.vx > 0) {
+            return;
+          }
+          if (bag.x < fuselage.x + fuselage.width * 0.5) {
+            bag.x = fuselage.x - bag.width * 0.5;
+            bag.vx = -Math.abs(bag.vx) * 0.48;
+          } else {
+            bag.x = fuselage.x + fuselage.width + bag.width * 0.5;
+            bag.vx = Math.abs(bag.vx) * 0.24;
+          }
+          bag.vy *= 0.9;
+          bag.av += 0.05;
+          burst(bag.x, bag.y, 6, "rgba(255,255,255,0.72)", 3.3, 4.5);
+        }
+      }
+    }
+    function updateBag(bag, dt) {
+      bag.lifeTimer += dt;
+      if (bag.state === "ready") {
+        const baseX = workerAnchor.x + 22 + Math.sin(state.introBlink * 4) * 2;
+        const baseY = workerAnchor.y - bag.height * 0.54 + Math.cos(state.introBlink * 5) * 1.8;
+        if (state.dragging && state.draggedBag === bag && state.dragVisual) {
+          bag.x += (state.dragVisual.x - bag.x) * 0.34;
+          bag.y += (state.dragVisual.y - bag.y) * 0.34;
+          bag.angle = clamp((bag.x - state.dragStart.x) * 0.01, -0.35, 0.35);
+        } else {
+          bag.x = baseX;
+          bag.y = baseY;
+          bag.angle = Math.sin(state.introBlink * 2.3) * 0.04;
+        }
+        return;
+      }
+      if (bag.state === "loaded") {
+        bag.x = clamp(bag.x + bag.vx, CONFIG.cargoDepth.x + 12, CONFIG.cargoDepth.x + CONFIG.cargoDepth.width - 6);
+        bag.y = clamp(bag.y + bag.vy, CONFIG.cargoDepth.y + 18, CONFIG.cargoDepth.y + CONFIG.cargoDepth.height - 12);
+        bag.vx *= 0.88;
+        bag.vy *= 0.88;
+        bag.av *= 0.9;
+        bag.angle += bag.av;
+        return;
+      }
+      if (bag.state === "broken") {
+        bag.vy += CONFIG.gravity * 0.65;
+        bag.x += bag.vx;
+        bag.y += bag.vy;
+        bag.angle += bag.av;
+      } else {
+        bag.vy += CONFIG.gravity * (0.82 + bag.weight);
+        bag.x += bag.vx;
+        bag.y += bag.vy;
+        bag.angle += bag.av;
+        bag.av += Math.sin(bag.lifeTimer * (3 + bag.weirdness * 7)) * bag.weirdness * 0.006;
+        bag.av *= 0.998;
+      }
+      const bounds = getBagBounds(bag);
+      if (!bag.loaded && bagInsideCargo(bag)) {
+        markLoaded(bag);
+        return;
+      }
+      bounceBagFromPlane(bag, bounds);
+      if (bag.x + bag.width * 0.5 > canvas.width - 14) {
+        bag.x = canvas.width - 14 - bag.width * 0.5;
+        bag.vx = -Math.abs(bag.vx) * CONFIG.wallBounce;
+      }
+      if (bag.x - bag.width * 0.5 < 22) {
+        bag.x = 22 + bag.width * 0.5;
+        bag.vx = Math.abs(bag.vx) * CONFIG.wallBounce;
+      }
+      if (bag.y + bag.height * 0.5 >= groundY) {
+        const impactSpeed = Math.abs(bag.vy);
+        bag.y = groundY - bag.height * 0.5;
+        bag.vy = -impactSpeed * Math.max(0.12, bag.bounce);
+        bag.vx *= 0.88;
+        bag.av *= 0.82;
+        burst(bag.x, groundY - 8, Math.round(clamp(impactSpeed * 0.9, 5, 16)), "rgba(121, 83, 47, 0.38)", 3.8, 5.5);
+        if (impactSpeed > CONFIG.breakVelocityThreshold * bag.weight) {
+          const chance = CONFIG.breakBaseChance + bag.breakable + (impactSpeed - CONFIG.breakVelocityThreshold * bag.weight) * 0.03;
+          if (Math.random() < chance) {
+            markBroken(bag);
+            return;
+          }
+        }
+        bag.restFrames = impactSpeed < 2.1 ? bag.restFrames + 1 : 0;
+        if (bag === state.currentBag && !bag.loaded && !bag.broken && bag.restFrames > 10) {
+          markMissed(bag);
+        }
+      }
+      if (bag === state.currentBag && !bag.loaded && !bag.broken && bag.y + bag.height * 0.5 >= groundY - 1) {
+        if (bag.lifeTimer > 1.2 && Math.abs(bag.vx) < 1.1 && Math.abs(bag.vy) < 2.8) {
+          markMissed(bag);
+        }
+      }
+    }
+    function cleanupEntities() {
+      state.entities = state.entities.filter((bag) => {
+        if (bag === state.currentBag) return true;
+        if (bag.loaded) return bag.lifeTimer < 10;
+        if (bag.broken) return bag.lifeTimer < 4.6;
+        if (bag.state === "missed") return bag.lifeTimer < 3.4;
+        return bag.lifeTimer < 7.6;
+      });
+    }
+    function updateParticles(dt) {
+      state.particles = state.particles.filter((p) => {
+        p.life -= dt;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += CONFIG.gravity * 0.18;
+        p.vx *= 0.985;
+        p.size *= 0.993;
+        p.angle += p.spin;
+        return p.life > 0.02 && p.size > 0.4;
+      });
+    }
+    function updatePopups(dt) {
+      state.popups = state.popups.filter((p) => {
+        p.life -= dt;
+        p.y += p.vy;
+        return p.life > 0;
+      });
+    }
+    function update(dt) {
+      state.introBlink += dt;
+      state.laughTimer = Math.max(0, state.laughTimer - dt);
+      if (state.mode === "playing") {
+        state.roundTime -= dt;
+        if (state.roundTime <= 0) {
+          state.roundTime = 0;
+          if (state.dragging) releaseDrag();
+          endGame();
+        }
+        if (!state.currentBag && state.spawnTimer > 0) {
+          state.spawnTimer -= dt * 1000;
+          if (state.spawnTimer <= 0) spawnBag();
+        }
+        state.entities.forEach((bag) => updateBag(bag, dt));
+        cleanupEntities();
+      }
+      updateParticles(dt);
+      updatePopups(dt);
+      state.shake = Math.max(0, state.shake - dt * 28);
+      updateHud();
+    }
+    function drawBackground() {
+      ctx.fillStyle = "rgba(255,255,255,0.38)";
+      ctx.beginPath();
+      ctx.arc(180, 120, 48, 0, Math.PI * 2);
+      ctx.arc(220, 114, 42, 0, Math.PI * 2);
+      ctx.arc(260, 126, 38, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(934, 102, 42, 0, Math.PI * 2);
+      ctx.arc(970, 94, 36, 0, Math.PI * 2);
+      ctx.arc(1004, 104, 40, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#9bb8c9";
+      ctx.fillRect(0, 478, canvas.width, 116);
+      ctx.fillStyle = "#6c7f8d";
+      ctx.fillRect(0, 590, canvas.width, 130);
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.lineWidth = 7;
+      for (let x = -40; x < canvas.width; x += 120) {
+        ctx.beginPath();
+        ctx.moveTo(x, 634);
+        ctx.lineTo(x + 62, 634);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#d4dfe8";
+      ctx.fillRect(0, 410, 180, 70);
+      ctx.fillRect(1020, 438, 180, 42);
+      ctx.fillStyle = "#5f7989";
+      ctx.fillRect(38, 430, 22, 50);
+      ctx.fillRect(1042, 450, 18, 30);
+      ctx.fillRect(1148, 450, 18, 30);
+    }
+    function drawPlane() {
+      ctx.fillStyle = "#f6f9ff";
+      roundRect(ctx, planeBody.x, planeBody.y, planeBody.width, planeBody.height, 80);
+      ctx.fill();
+      ctx.fillStyle = "#b8c6d7";
+      ctx.beginPath();
+      ctx.moveTo(planeBody.x - 42, planeBody.y + 148);
+      ctx.quadraticCurveTo(planeBody.x - 6, planeBody.y + 92, planeBody.x - 8, planeBody.y + 214);
+      ctx.fill();
+      ctx.fillStyle = "#184d96";
+      ctx.fillRect(planeBody.x + 24, planeBody.y + 96, planeBody.width - 54, 24);
+      ctx.fillStyle = "#f3c228";
+      ctx.fillRect(planeBody.x + 24, planeBody.y + 120, planeBody.width - 54, 8);
+      ctx.fillStyle = "#d7e1ec";
+      ctx.beginPath();
+      ctx.moveTo(828, 242);
+      ctx.lineTo(930, 190);
+      ctx.lineTo(1048, 194);
+      ctx.lineTo(900, 256);
+      ctx.fill();
+      ctx.fillStyle = "#204f99";
+      ctx.beginPath();
+      ctx.moveTo(930, 396);
+      ctx.lineTo(1040, 438);
+      ctx.lineTo(1120, 438);
+      ctx.lineTo(968, 386);
+      ctx.fill();
+      ctx.fillStyle = "#254c73";
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.arc(858 + i * 54, 250, 13, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = "#123f7c";
+      ctx.fillRect(1092, 246, 16, 72);
+      ctx.fillStyle = "#ffd166";
+      ctx.beginPath();
+      ctx.moveTo(CONFIG.cargoOpening.x - 52, CONFIG.cargoOpening.y + 36);
+      ctx.lineTo(CONFIG.cargoOpening.x - 6, CONFIG.cargoOpening.y + 18);
+      ctx.lineTo(CONFIG.cargoOpening.x - 6, CONFIG.cargoOpening.y + CONFIG.cargoOpening.height - 12);
+      ctx.lineTo(CONFIG.cargoOpening.x - 52, CONFIG.cargoOpening.y + CONFIG.cargoOpening.height - 28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#fed766";
+      roundRect(ctx, CONFIG.cargoOpening.x - 8, CONFIG.cargoOpening.y - 8, CONFIG.cargoOpening.width + 16, CONFIG.cargoOpening.height + 16, 18);
+      ctx.fill();
+      ctx.fillStyle = "#1a3550";
+      roundRect(ctx, CONFIG.cargoOpening.x, CONFIG.cargoOpening.y, CONFIG.cargoOpening.width, CONFIG.cargoOpening.height, 15);
+      ctx.fill();
+      ctx.fillStyle = "#9aaec3";
+      roundRect(ctx, CONFIG.cargoOpening.x + 34, CONFIG.cargoOpening.y - 28, CONFIG.cargoOpening.width - 50, 24, 10);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.1)";
+      roundRect(ctx, CONFIG.cargoDepth.x, CONFIG.cargoDepth.y, CONFIG.cargoDepth.width, CONFIG.cargoDepth.height, 12);
+      ctx.fill();
+      ctx.fillStyle = "#184d96";
+      ctx.font = "bold 18px Trebuchet MS";
+      ctx.fillText("RIANAIR-ish", 820, 210);
+      ctx.strokeStyle = "rgba(255,255,255,0.5)";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 7]);
+      roundRect(ctx, CONFIG.cargoOpening.x - 3, CONFIG.cargoOpening.y - 3, CONFIG.cargoOpening.width + 6, CONFIG.cargoOpening.height + 6, 16);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    function drawBelt() {
+      ctx.fillStyle = "#36495a";
+      roundRect(ctx, beltRect.x, beltRect.y, beltRect.width, beltRect.height, 16);
+      ctx.fill();
+      ctx.fillStyle = "#536d82";
+      for (let i = 0; i < 6; i++) ctx.fillRect(beltRect.x + 14 + i * 28, beltRect.y + 10, 18, beltRect.height - 20);
+      ctx.fillStyle = "#7f6147";
+      ctx.fillRect(beltRect.x + 16, beltRect.y + beltRect.height, 22, 40);
+      ctx.fillRect(beltRect.x + beltRect.width - 38, beltRect.y + beltRect.height, 22, 40);
+    }
+    function drawWorker() {
+      ctx.save();
+      ctx.translate(workerAnchor.x - 28, 340);
+      const idle = Math.sin(state.introBlink * 2.8) * 3;
+      const laughing = state.laughTimer > 0;
+      ctx.fillStyle = "#203a4f";
+      ctx.fillRect(26, 132, 22, 72);
+      ctx.fillRect(66, 132, 22, 72);
+      ctx.fillStyle = "#ffb387";
+      ctx.fillRect(22, 194, 28, 16);
+      ctx.fillRect(62, 194, 28, 16);
+      ctx.fillStyle = "#132c5e";
+      ctx.fillRect(18, 204, 36, 10);
+      ctx.fillRect(58, 204, 36, 10);
+      ctx.fillStyle = "#1a56a3";
+      roundRect(ctx, 18, 60 + idle * 0.2, 78, 84, 24);
+      ctx.fill();
+      ctx.fillStyle = "#ffd44d";
+      roundRect(ctx, 30, 72 + idle * 0.15, 54, 62, 18);
+      ctx.fill();
+      ctx.fillStyle = "#f6e8cc";
+      ctx.fillRect(42, 76, 20, 48);
+      ctx.fillStyle = "#0c2c58";
+      ctx.fillRect(28, 104, 58, 8);
+      ctx.fillRect(28, 118, 58, 8);
+      ctx.fillStyle = "#ffb387";
+      roundRect(ctx, 26, idle, 62, 64, 26);
+      ctx.fill();
+      ctx.fillStyle = "#43322c";
+      ctx.beginPath();
+      ctx.moveTo(22, 26 + idle);
+      ctx.quadraticCurveTo(58, -10 + idle, 92, 20 + idle);
+      ctx.lineTo(90, 42 + idle);
+      ctx.quadraticCurveTo(50, 24 + idle, 24, 36 + idle);
+      ctx.fill();
+      ctx.strokeStyle = "#3a241d";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(44, 38 + idle);
+      ctx.lineTo(52, 39 + idle);
+      ctx.moveTo(66, 38 + idle);
+      ctx.lineTo(74, 40 + idle);
+      ctx.stroke();
+      ctx.fillStyle = "#3a241d";
+      ctx.beginPath();
+      ctx.arc(50, 45 + idle, 3, 0, Math.PI * 2);
+      ctx.arc(69, 45 + idle, 3, 0, Math.PI * 2);
+      ctx.fill();
+      if (laughing) {
+        ctx.fillStyle = "#6e2f20";
+        ctx.beginPath();
+        ctx.ellipse(59, 56 + idle, 11, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#ffd7c2";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(51, 53 + idle);
+        ctx.lineTo(67, 53 + idle);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(59, 53 + idle, 12, 0.18, Math.PI - 0.12);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#ffb387";
+      ctx.save();
+      ctx.translate(18, 80);
+      ctx.rotate(-0.42);
+      roundRect(ctx, -8, -8, 16, 58, 8);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.translate(100, 94);
+      ctx.rotate(0.18 + Math.sin(state.introBlink * 2) * 0.03);
+      roundRect(ctx, -8, -8, 16, 60, 8);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = "#ffef99";
+      ctx.beginPath();
+      ctx.moveTo(20, 74);
+      ctx.lineTo(6, 94);
+      ctx.lineTo(18, 94);
+      ctx.lineTo(14, 120);
+      ctx.lineTo(30, 97);
+      ctx.lineTo(18, 97);
+      ctx.fill();
+      ctx.restore();
+    }
+    function drawHelper() {
+      ctx.save();
+      ctx.translate(304, 370);
+      const idle = Math.sin(state.introBlink * 3.4 + 1.1) * 4;
+      const laughing = state.laughTimer > 0;
+      ctx.fillStyle = "#203a4f";
+      ctx.fillRect(20, 118, 18, 82);
+      ctx.fillRect(52, 118, 18, 82);
+      ctx.fillStyle = "#ffb387";
+      ctx.fillRect(16, 194, 24, 14);
+      ctx.fillRect(48, 194, 24, 14);
+      ctx.fillStyle = "#1a56a3";
+      roundRect(ctx, 10, 56 + idle * 0.2, 72, 74, 20);
+      ctx.fill();
+      ctx.fillStyle = "#ffd44d";
+      roundRect(ctx, 20, 68 + idle * 0.14, 52, 48, 14);
+      ctx.fill();
+      ctx.fillStyle = "#0c2c58";
+      ctx.fillRect(22, 84, 48, 7);
+      ctx.fillRect(22, 98, 48, 7);
+      ctx.fillStyle = "#ffcca8";
+      roundRect(ctx, 18, idle, 56, 58, 22);
+      ctx.fill();
+      ctx.fillStyle = "#5a3d2b";
+      ctx.beginPath();
+      ctx.arc(34, 38 + idle, 3, 0, Math.PI * 2);
+      ctx.arc(58, 40 + idle, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#5a3d2b";
+      ctx.lineWidth = 3;
+      if (laughing) {
+        ctx.fillStyle = "#6e2f20";
+        ctx.beginPath();
+        ctx.ellipse(46, 47 + idle, 10, 7, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(46, 44 + idle, 12, 0.8, 2.6);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#5a3d2b";
+      ctx.beginPath();
+      ctx.moveTo(18, 24 + idle);
+      ctx.quadraticCurveTo(48, -4 + idle, 74, 24 + idle);
+      ctx.lineTo(76, 10 + idle);
+      ctx.quadraticCurveTo(48, -14 + idle, 18, 8 + idle);
+      ctx.fill();
+      ctx.fillStyle = "#ffcca8";
+      ctx.save();
+      ctx.translate(12, 78);
+      ctx.rotate(-1.25 + Math.sin(state.introBlink * 3.4) * 0.05);
+      roundRect(ctx, -7, -8, 14, 52, 8);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.translate(78, 76);
+      ctx.rotate(0.12);
+      roundRect(ctx, -7, -8, 14, 52, 8);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = "#ffeaa7";
+      roundRect(ctx, -10, 84 + idle * 0.15, 18, 10, 5);
+      ctx.fill();
+      ctx.fillStyle = "#6c5ce7";
+      roundRect(ctx, -14, 70 + idle * 0.15, 26, 18, 6);
+      ctx.fill();
+      ctx.restore();
+    }
+    function drawBag(bag) {
+      ctx.save();
+      ctx.translate(bag.x, bag.y);
+      ctx.rotate(bag.angle);
+      const wobble = bag.broken ? (1 + Math.sin(bag.lifeTimer * 14) * 0.08) : 1;
+      ctx.scale(1, wobble);
+      const x = -bag.width * 0.5;
+      const y = -bag.height * 0.5;
+      ctx.fillStyle = bag.color;
+      roundRect(ctx, x, y, bag.width, bag.height, bag.size * 0.18);
+      ctx.fill();
+      ctx.fillStyle = bag.accent;
+      roundRect(ctx, x + 6, y + 6, bag.width - 12, bag.height - 12, bag.size * 0.14);
+      ctx.fill();
+      ctx.fillStyle = bag.color;
+      roundRect(ctx, x + 12, y + 12, bag.width - 24, bag.height - 24, bag.size * 0.12);
+      ctx.fill();
+      ctx.strokeStyle = "#2f2f2f";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-bag.width * 0.12, y + 4);
+      ctx.quadraticCurveTo(0, y - bag.height * 0.28 + bag.handleOffset * 12, bag.width * 0.12, y + 4);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.38)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + 16, y + 16);
+      ctx.lineTo(x + bag.width - 16, y + 16);
+      ctx.stroke();
+      if (bag.broken) {
+        ctx.strokeStyle = "#3a241d";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(x + 18, y + 12);
+        ctx.lineTo(x + bag.width * 0.48, y + bag.height * 0.42);
+        ctx.lineTo(x + bag.width - 20, y + 10);
+        ctx.stroke();
+        ctx.fillStyle = "#f2f7ff";
+        for (let i = 0; i < 3; i++) {
+          ctx.save();
+          ctx.translate(rand(x + 16, x + bag.width - 16), rand(y + 14, y + bag.height - 18));
+          ctx.rotate(rand(-0.5, 0.5));
+          ctx.fillRect(-6, -4, 12, 8);
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+    }
+    function drawAimingGuide() {
+      if (!state.dragging || !state.draggedBag || !state.dragStart || !state.dragPoint) return;
+      const dx = state.dragPoint.x - state.dragStart.x;
+      const dy = state.dragPoint.y - state.dragStart.y;
+      const dist = Math.min(Math.hypot(dx, dy), CONFIG.maxDrag);
+      const angle = Math.atan2(dy, dx);
+      const pullX = Math.cos(angle) * dist;
+      const pullY = Math.sin(angle) * dist;
+      const bag = state.draggedBag;
+      const launchWeight = Math.pow(bag.weight, 1.16);
+      const vx = (-pullX * CONFIG.launchForce) / launchWeight;
+      const vy = (-pullY * CONFIG.launchForce * 1.05) / launchWeight - 1.4;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([9, 8]);
+      ctx.beginPath();
+      for (let i = 0; i < 24; i++) {
+        const t = i * 0.28;
+        const px = state.dragStart.x + vx * t * 12;
+        const py = state.dragStart.y + vy * t * 12 + 0.5 * CONFIG.gravity * bag.weight * (t * 12) * (t * 0.18);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = "rgba(255,122,56,0.95)";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(state.dragStart.x, state.dragStart.y);
+      ctx.lineTo(state.dragStart.x + pullX, state.dragStart.y + pullY);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.96)";
+      ctx.beginPath();
+      ctx.arc(state.dragPoint.x, state.dragPoint.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    function drawParticles() {
+      state.particles.forEach((p) => {
+        ctx.save();
+        ctx.globalAlpha = clamp(p.life * 1.3, 0, 1);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.angle);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size * 0.5, -p.size * 0.5, p.size, p.size * 0.72);
+        ctx.restore();
+      });
+    }
+    function drawPopups() {
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.font = "bold 28px Trebuchet MS";
+      state.popups.forEach((p) => {
+        ctx.globalAlpha = clamp(p.life, 0, 1);
+        ctx.fillStyle = p.color;
+        ctx.fillText(p.text, p.x, p.y);
+      });
+      ctx.restore();
+    }
+    function drawForegroundSigns() {
+      ctx.fillStyle = "#1f3c55";
+      roundRect(ctx, 42, 70, 170, 58, 18);
+      ctx.fill();
+      ctx.fillStyle = "#ffe17d";
+      ctx.font = "bold 20px Trebuchet MS";
+      ctx.fillText("RUSH BAG LANE", 61, 107);
+      ctx.fillStyle = "#ffef99";
+      roundRect(ctx, 478, 94, 156, 48, 16);
+      ctx.fill();
+      ctx.fillStyle = "#1f3c55";
+      ctx.font = "bold 18px Trebuchet MS";
+      ctx.fillText("ALVO: PORAO ABERTO", 490, 124);
+    }
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      if (state.shake > 0) ctx.translate(rand(-state.shake, state.shake), rand(-state.shake * 0.6, state.shake * 0.6));
+      drawBackground();
+      drawPlane();
+      drawBelt();
+      drawWorker();
+      drawHelper();
+      drawForegroundSigns();
+      state.entities.forEach(drawBag);
+      drawAimingGuide();
+      drawParticles();
+      drawPopups();
+      ctx.restore();
+    }
+    let lastTime = 0;
+    function frame(ts) {
+      if (!lastTime) lastTime = ts;
+      const dt = Math.min(0.033, (ts - lastTime) / 1000);
+      lastTime = ts;
+      update(dt);
+      draw();
+      requestAnimationFrame(frame);
+    }
+    canvas.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", releaseDrag);
+    window.addEventListener("pointercancel", releaseDrag);
+    restartButton.addEventListener("click", resetGame);
+    overlayButton.addEventListener("click", startGame);
+    showOverlay("Ramp Ruckus", "Clique e arraste a mala para mirar. Solte para lançar no compartimento destacado do avião. Quanto mais rápido, mais bagunça produtiva.", false);
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
