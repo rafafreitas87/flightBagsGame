@@ -247,6 +247,7 @@
       musicGain: null,
       sfxGain: null,
       enabled: false,
+      autoArmed: false,
       started: false,
       nextBeatAt: 0,
       musicTimer: 0
@@ -264,9 +265,9 @@
       audio.master = audio.ctx.createGain();
       audio.musicGain = audio.ctx.createGain();
       audio.sfxGain = audio.ctx.createGain();
-      audio.master.gain.value = 0.5;
-      audio.musicGain.gain.value = 0.17;
-      audio.sfxGain.gain.value = 0.5;
+      audio.master.gain.value = 0.98;
+      audio.musicGain.gain.value = 0.5;
+      audio.sfxGain.gain.value = 0.82;
       audio.musicGain.connect(audio.master);
       audio.sfxGain.connect(audio.master);
       audio.master.connect(audio.ctx.destination);
@@ -317,31 +318,31 @@
 
     function triggerLaunchSound(weight) {
       if (!audio.enabled) return;
-      playTone("triangle", 190 / Math.max(0.7, weight), 0.16, 0.09, audio.sfxGain);
-      playTone("square", 260 / Math.max(0.8, weight), 0.08, 0.05, audio.sfxGain, 0.03);
+      playTone("triangle", 190 / Math.max(0.7, weight), 0.18, 0.14, audio.sfxGain);
+      playTone("square", 260 / Math.max(0.8, weight), 0.1, 0.08, audio.sfxGain, 0.03);
     }
 
     function triggerImpactSound(power, broken = false) {
       if (!audio.enabled) return;
-      const vol = clamp(power / 24, 0.05, 0.22);
+      const vol = clamp(power / 20, 0.08, 0.34);
       playNoiseBurst(0.12, vol, audio.sfxGain, 0, 240);
       playTone("triangle", broken ? 120 : 150, 0.11, vol * 0.85, audio.sfxGain, 0.01);
       if (broken) {
-        playTone("square", 420, 0.08, 0.08, audio.sfxGain, 0.02, 600);
+        playTone("square", 420, 0.1, 0.14, audio.sfxGain, 0.02, 600);
       }
     }
 
     function triggerScoreSound() {
       if (!audio.enabled) return;
-      playTone("triangle", 520, 0.12, 0.09, audio.sfxGain);
-      playTone("triangle", 680, 0.16, 0.08, audio.sfxGain, 0.08);
+      playTone("triangle", 520, 0.14, 0.14, audio.sfxGain);
+      playTone("triangle", 680, 0.18, 0.12, audio.sfxGain, 0.08);
     }
 
     function triggerLaughSound() {
       if (!audio.enabled) return;
-      playTone("square", 520, 0.08, 0.055, audio.sfxGain, 0);
-      playTone("square", 610, 0.07, 0.05, audio.sfxGain, 0.06);
-      playTone("square", 480, 0.07, 0.042, audio.sfxGain, 0.13);
+      playTone("square", 520, 0.1, 0.09, audio.sfxGain, 0);
+      playTone("square", 610, 0.09, 0.08, audio.sfxGain, 0.06);
+      playTone("square", 480, 0.08, 0.06, audio.sfxGain, 0.13);
     }
 
     function tickMusic() {
@@ -351,30 +352,59 @@
         audio.nextBeatAt = now + 0.05;
         audio.started = true;
       }
-      const chords = [185, 220, 196, 247];
+      const progression = [
+        { root: 220, lead: [1, 1.25, 1.5, 1.25] },
+        { root: 247, lead: [1, 1.5, 1.68, 1.5] },
+        { root: 196, lead: [1, 1.2, 1.5, 1.8] },
+        { root: 262, lead: [1, 1.33, 1.5, 2] }
+      ];
       while (audio.nextBeatAt < now + 0.35) {
-        const root = chords[Math.floor(audio.musicTimer) % chords.length];
-        playTone("sine", root, 0.32, 0.03, audio.musicGain, audio.nextBeatAt - now);
-        playTone("sine", root * 1.5, 0.26, 0.022, audio.musicGain, audio.nextBeatAt - now + 0.04);
-        if (Math.floor(audio.musicTimer * 2) % 2 === 0) {
-          playTone("triangle", 92, 0.12, 0.028, audio.musicGain, audio.nextBeatAt - now);
+        const step = Math.floor(audio.musicTimer) % progression.length;
+        const phase = Math.floor(audio.musicTimer * 2) % 4;
+        const part = progression[step];
+        const leadFreq = part.root * part.lead[phase];
+        const offset = audio.nextBeatAt - now;
+
+        playTone("square", leadFreq, 0.18, 0.09, audio.musicGain, offset);
+        playTone("triangle", part.root * 0.5, 0.24, 0.08, audio.musicGain, offset);
+        playTone("sine", part.root * 1.5, 0.18, 0.04, audio.musicGain, offset + 0.04);
+
+        if (phase === 0 || phase === 2) {
+          playTone("triangle", 110, 0.12, 0.08, audio.musicGain, offset);
+        } else {
+          playTone("triangle", 147, 0.1, 0.06, audio.musicGain, offset);
         }
-        audio.nextBeatAt += 0.42;
+
+        if (phase === 3) {
+          playTone("square", leadFreq * 1.12, 0.12, 0.05, audio.musicGain, offset + 0.07);
+        }
+
+        audio.nextBeatAt += 0.24;
         audio.musicTimer += 1;
       }
     }
 
-    async function toggleAudio() {
+    async function setAudioEnabled(enabled) {
       if (!ensureAudioContext()) return;
       if (audio.ctx.state === "suspended") {
         await audio.ctx.resume();
       }
-      audio.enabled = !audio.enabled;
+      audio.enabled = enabled;
       if (audio.enabled) {
         audio.started = false;
         tickMusic();
       }
       updateAudioButton();
+    }
+
+    async function toggleAudio() {
+      await setAudioEnabled(!audio.enabled);
+    }
+
+    function armAudioFromGesture() {
+      if (audio.autoArmed || audio.enabled) return;
+      audio.autoArmed = true;
+      setAudioEnabled(true);
     }
 
     function roundRect(ctx2d, x, y, w, h, r) {
@@ -459,6 +489,7 @@
       }
     }
     function startGame() {
+      armAudioFromGesture();
       state.mode = "playing";
       state.roundTime = CONFIG.roundDuration;
       state.score = 0;
@@ -502,6 +533,7 @@
     }
     function onPointerDown(evt) {
       if (state.mode !== "playing") return;
+      armAudioFromGesture();
       const point = screenToCanvas(evt);
       const isTouch = evt.pointerType === "touch";
       const bag = isTouch ? (pickTouchLaunchBag(point) || pickReadyBag(point)) : pickReadyBag(point);
